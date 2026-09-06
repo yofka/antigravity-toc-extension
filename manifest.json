@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Antigravity Chat TOC Navigator",
+  "version": "1.0.0",
+  "description": "Antigravityのチャット画面に階層ツリー目次ナビゲーションを表示します",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://antigravity.static.usercontent.goog/*",
+        "https://*.usercontent.goog/*",
+        "https://antigravity.google.com/*"
+      ],
+      "all_frames": true,
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
