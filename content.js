@@ -6,6 +6,7 @@
   var STORAGE_KEY_LEVEL = 'ag_toc_level';
   var STORAGE_KEY_WRAP = 'ag_toc_wrap';
   var STORAGE_KEY_FOLDED = 'ag_toc_folded';
+  var STORAGE_KEY_MINI_POS = 'ag_toc_mini_pos';
 
   var currentMaxLevel = parseInt(localStorage.getItem(STORAGE_KEY_LEVEL), 10) || 2;
   var isWrap = localStorage.getItem(STORAGE_KEY_WRAP) === 'true'; // デフォルトは false (1行表示)
@@ -483,28 +484,146 @@
     }
   }
 
-  // 小さなシェード（最小化）ボタンの作成・表示
+  function clampMiniBtnPosition() {
+    if (!miniBtn || miniBtn.style.display === 'none') return;
+    var rect = miniBtn.getBoundingClientRect();
+    if (rect.width === 0) return;
+    var maxL = Math.max(6, window.innerWidth - rect.width - 6);
+    var maxT = Math.max(6, window.innerHeight - rect.height - 6);
+    var curL = rect.left;
+    var curT = rect.top;
+    var clampedL = Math.max(6, Math.min(maxL, curL));
+    var clampedT = Math.max(6, Math.min(maxT, curT));
+    if (clampedL !== curL || clampedT !== curT) {
+      miniBtn.style.left = clampedL + 'px';
+      miniBtn.style.top = clampedT + 'px';
+      miniBtn.style.right = 'auto';
+    }
+  }
+
+  // 小さなシェード（最小化）ボタンの作成・表示（ドラッグ移動対応）
   function showMiniBtn() {
     if (!miniBtn) {
       miniBtn = uiDoc.createElement('button');
       miniBtn.id = 'ag_toc_mini_btn';
-      miniBtn.title = '目次パネルを展開 (Alt+T)';
-      miniBtn.style.cssText = 'position:fixed;top:50px;right:10px;z-index:2147483647;background:#1a73e8;color:#ffffff;border:1px solid #1557b0;border-radius:14px;height:28px;padding:0 10px;font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;box-shadow:0 2px 8px rgba(0,0,0,0.25);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;transition:all 0.15s ease;';
+      miniBtn.title = '目次パネルを展開 (ドラッグで移動可能 / Alt+T)';
+      miniBtn.style.cssText = 'position:fixed;top:50px;right:10px;z-index:2147483647;background:#1a73e8;color:#ffffff;border:1px solid #1557b0;border-radius:14px;height:28px;padding:0 10px;font-size:11px;font-weight:600;cursor:grab;display:flex;align-items:center;gap:4px;box-shadow:0 2px 8px rgba(0,0,0,0.25);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;user-select:none;touch-action:none;transition:background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;';
       miniBtn.textContent = '📑 目次 ▲';
-      miniBtn.onclick = function() {
+
+      // 保存された位置の復元
+      try {
+        var savedPos = JSON.parse(localStorage.getItem(STORAGE_KEY_MINI_POS));
+        if (savedPos && typeof savedPos.top === 'number' && typeof savedPos.left === 'number') {
+          var maxL = Math.max(6, window.innerWidth - 80);
+          var maxT = Math.max(6, window.innerHeight - 30);
+          miniBtn.style.left = Math.max(6, Math.min(maxL, savedPos.left)) + 'px';
+          miniBtn.style.top = Math.max(6, Math.min(maxT, savedPos.top)) + 'px';
+          miniBtn.style.right = 'auto';
+        }
+      } catch(e) {}
+
+      // ドラッグ移動処理
+      var isDragging = false;
+      var hasMoved = false;
+      var startX = 0;
+      var startY = 0;
+      var initialLeft = 0;
+      var initialTop = 0;
+
+      miniBtn.addEventListener('pointerdown', function(e) {
+        if (e.button !== 0) return;
+        isDragging = true;
+        hasMoved = false;
+        startX = e.clientX;
+        startY = e.clientY;
+
+        var rect = miniBtn.getBoundingClientRect();
+        initialLeft = rect.left;
+        initialTop = rect.top;
+
+        miniBtn.style.left = initialLeft + 'px';
+        miniBtn.style.top = initialTop + 'px';
+        miniBtn.style.right = 'auto';
+        miniBtn.style.bottom = 'auto';
+        miniBtn.style.cursor = 'grabbing';
+        if (miniBtn.setPointerCapture) {
+          try { miniBtn.setPointerCapture(e.pointerId); } catch(err) {}
+        }
+        e.preventDefault();
+      });
+
+      miniBtn.addEventListener('pointermove', function(e) {
+        if (!isDragging) return;
+        var dx = e.clientX - startX;
+        var dy = e.clientY - startY;
+        if (!hasMoved && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
+          hasMoved = true;
+        }
+        if (hasMoved) {
+          var newLeft = initialLeft + dx;
+          var newTop = initialTop + dy;
+          var btnW = miniBtn.offsetWidth || 80;
+          var btnH = miniBtn.offsetHeight || 28;
+          var minX = 6;
+          var maxX = Math.max(minX, window.innerWidth - btnW - 6);
+          var minY = 6;
+          var maxY = Math.max(minY, window.innerHeight - btnH - 6);
+
+          newLeft = Math.max(minX, Math.min(maxX, newLeft));
+          newTop = Math.max(minY, Math.min(maxY, newTop));
+
+          miniBtn.style.left = newLeft + 'px';
+          miniBtn.style.top = newTop + 'px';
+        }
+      });
+
+      function onPointerUp(e) {
+        if (!isDragging) return;
+        isDragging = false;
+        miniBtn.style.cursor = 'grab';
+        if (miniBtn.releasePointerCapture) {
+          try { miniBtn.releasePointerCapture(e.pointerId); } catch(err) {}
+        }
+        if (hasMoved) {
+          var rect = miniBtn.getBoundingClientRect();
+          try {
+            localStorage.setItem(STORAGE_KEY_MINI_POS, JSON.stringify({
+              top: Math.round(rect.top),
+              left: Math.round(rect.left)
+            }));
+          } catch(err) {}
+        }
+      }
+
+      miniBtn.addEventListener('pointerup', onPointerUp);
+      miniBtn.addEventListener('pointercancel', onPointerUp);
+
+      miniBtn.addEventListener('click', function(e) {
+        if (hasMoved) {
+          e.preventDefault();
+          e.stopPropagation();
+          setTimeout(function() { hasMoved = false; }, 0);
+          return;
+        }
         expandPanel();
-      };
+      });
+
       miniBtn.onmouseenter = function() {
-        miniBtn.style.background = '#1557b0';
-        miniBtn.style.transform = 'scale(1.03)';
+        if (!isDragging) {
+          miniBtn.style.background = '#1557b0';
+          miniBtn.style.transform = 'scale(1.03)';
+        }
       };
       miniBtn.onmouseleave = function() {
-        miniBtn.style.background = '#1a73e8';
-        miniBtn.style.transform = 'none';
+        if (!isDragging) {
+          miniBtn.style.background = '#1a73e8';
+          miniBtn.style.transform = 'none';
+        }
       };
       uiDoc.body.appendChild(miniBtn);
     } else {
       miniBtn.style.display = 'flex';
+      clampMiniBtnPosition();
     }
   }
 
@@ -704,7 +823,10 @@
     highlightCurrentHeading();
 
     uiDoc.addEventListener('scroll', highlightCurrentHeading, { passive: true, capture: true });
-    window.addEventListener('resize', updateOverflowButtons, { passive: true });
+    window.addEventListener('resize', function() {
+      updateOverflowButtons();
+      clampMiniBtnPosition();
+    }, { passive: true });
 
     if (isFolded) {
       foldPanel();
