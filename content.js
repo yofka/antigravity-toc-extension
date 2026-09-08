@@ -169,6 +169,9 @@
     '.bk-toc-more-btn { display: none !important; flex-shrink: 0 !important; margin-left: 4px !important; align-self: flex-end !important; background: #f1f3f4 !important; color: #5f6368 !important; border: 1px solid #dadce0 !important; border-radius: 3px !important; font-size: 10px !important; line-height: 14px !important; height: 16px !important; padding: 0 4px !important; cursor: pointer !important; user-select: none !important; font-family: monospace, sans-serif !important; box-sizing: border-box !important; transition: all 0.15s ease !important; }',
     '.bk-toc-more-btn:hover { background: #e8f0fe !important; color: #1a73e8 !important; border-color: #1a73e8 !important; }',
     '#ag_toc_container.bk-toc-wrap-mode .bk-toc-more-btn.has-overflow { display: inline-flex !important; align-items: center !important; justify-content: center !important; }',
+    /* 展開時: 見出し行エリアの高さいっぱいの縦長ボタン */
+    '#ag_toc_container.bk-toc-wrap-mode .bk-toc-more-btn.is-expanded { align-self: stretch !important; height: auto !important; min-height: 100% !important; width: 18px !important; padding: 4px 0 !important; display: inline-flex !important; flex-direction: column !important; justify-content: space-between !important; align-items: center !important; background: #f1f3f4 !important; color: #1a73e8 !important; border: 1px solid #dadce0 !important; border-radius: 3px !important; font-size: 10px !important; font-weight: bold !important; cursor: pointer !important; user-select: none !important; box-sizing: border-box !important; transition: all 0.15s ease !important; }',
+    '#ag_toc_container.bk-toc-wrap-mode .bk-toc-more-btn.is-expanded:hover { background: #e8f0fe !important; color: #1557b0 !important; border-color: #1a73e8 !important; }',
     '#ag_toc_container button:hover { opacity: 0.85; }'
   ].join('\n');
 
@@ -213,6 +216,24 @@
     }
   }
 
+  function setButtonState(btn, isExp) {
+    clearChildren(btn);
+    if (isExp) {
+      btn.classList.add('is-expanded');
+      btn.title = '4行に折りたたむ';
+      var a1 = uiDoc.createElement('span'); a1.textContent = '▲';
+      var a2 = uiDoc.createElement('span'); a2.textContent = '▲';
+      var a3 = uiDoc.createElement('span'); a3.textContent = '▲';
+      btn.appendChild(a1);
+      btn.appendChild(a2);
+      btn.appendChild(a3);
+    } else {
+      btn.classList.remove('is-expanded');
+      btn.textContent = '...';
+      btn.title = '末尾まで展開';
+    }
+  }
+
   function updateOverflowButtons() {
     if (!content) return;
     var rows = content.querySelectorAll('.bk-toc-item-row');
@@ -222,15 +243,12 @@
       if (!a || !btn) return;
       var idx = a.dataset.index;
       var isExp = !!expandedTextMap[idx];
+      setButtonState(btn, isExp);
       if (isExp) {
         a.classList.add('bk-toc-expanded');
-        btn.textContent = '▲';
-        btn.title = '4行に折りたたむ';
         btn.classList.add('has-overflow');
       } else {
         a.classList.remove('bk-toc-expanded');
-        btn.textContent = '...';
-        btn.title = '末尾まで展開';
         if (isWrap && container && container.classList.contains('bk-toc-wrap-mode')) {
           if (a.scrollHeight > a.clientHeight + 2) {
             btn.classList.add('has-overflow');
@@ -338,17 +356,13 @@
         e.stopPropagation();
         var isExp = !expandedTextMap[index];
         expandedTextMap[index] = isExp;
+        setButtonState(moreBtn, isExp);
         if (isExp) {
           a.classList.add('bk-toc-expanded');
-          moreBtn.textContent = '▲';
-          moreBtn.title = '4行に折りたたむ';
-          moreBtn.classList.add('has-overflow');
         } else {
           a.classList.remove('bk-toc-expanded');
-          moreBtn.textContent = '...';
-          moreBtn.title = '末尾まで展開';
-          moreBtn.classList.add('has-overflow');
         }
+        moreBtn.classList.add('has-overflow');
       };
 
       row.appendChild(toggle);
