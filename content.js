@@ -1084,12 +1084,58 @@
     var headerBlock = uiDoc.createElement('div');
     headerBlock.style.cssText = 'flex-shrink:0;background:#f8f9fa;border-bottom:1px solid #e0e0e0;box-sizing:border-box;';
 
-    // 1段目: タイトルとツールバーボタン群（Flexbox配置で重なりゼロ）
+    // 1段目: 元Webページ（チャット欄）への操作 (Home/PgUp/PgDn/End) + 全履歴読込
+    var scrollBar = uiDoc.createElement('div');
+    scrollBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:5px 10px 5px 10px;gap:6px;background:#f8f9fa;border-bottom:1px solid #e8eaed;box-sizing:border-box;';
+
+    var scrollGroup = uiDoc.createElement('div');
+    scrollGroup.style.cssText = 'display:flex;align-items:center;gap:3px;';
+
+    var scrollLabel = uiDoc.createElement('span');
+    scrollLabel.textContent = '移動:';
+    scrollLabel.style.cssText = 'font-weight:bold;color:#5f6368;margin-right:2px;font-size:11px;user-select:none;';
+    scrollGroup.appendChild(scrollLabel);
+
+    var navDefs = [
+      { text: '⏮', title: '最上部へスクロール (Homeキー相当)', action: 'home' },
+      { text: '▲', title: '1画面分上へスクロール (PageUpキー相当)', action: 'pageUp' },
+      { text: '▼', title: '1画面分下へスクロール (PageDownキー相当)', action: 'pageDown' },
+      { text: '⏭', title: '最下部へスクロール (Endキー相当)', action: 'end' }
+    ];
+
+    navDefs.forEach(function(def) {
+      var btn = uiDoc.createElement('button');
+      btn.textContent = def.text;
+      btn.title = def.title;
+      btn.style.cssText = 'border:1px solid #dadce0; background:#f1f3f4; color:#3c4043; cursor:pointer; border-radius:3px; width:22px; height:22px; font-size:11px; padding:0; text-align:center; transition:all 0.15s; font-weight:bold;';
+      btn.onmouseenter = function() { btn.style.background = '#e8f0fe'; btn.style.color = '#1a73e8'; btn.style.borderColor = '#1a73e8'; };
+      btn.onmouseleave = function() { btn.style.background = '#f1f3f4'; btn.style.color = '#3c4043'; btn.style.borderColor = '#dadce0'; };
+      btn.onclick = function(e) {
+        e.preventDefault();
+        scrollChat(def.action);
+      };
+      scrollGroup.appendChild(btn);
+    });
+
+    var panelLoadBtn = uiDoc.createElement('button');
+    panelLoadBtn.textContent = '⏫ 全履歴読込';
+    panelLoadBtn.title = '最上部まで繰り返しスクロールして全チャット履歴を読込';
+    panelLoadBtn.style.cssText = 'border:1px solid #dadce0; background:#f1f3f4; color:#3c4043; border-radius:3px; height:22px; padding:0 6px; font-size:10.5px; cursor:pointer; font-weight:500; transition:all 0.15s; white-space:nowrap;';
+    panelLoadBtn.onclick = function(e) {
+      e.preventDefault();
+      startLoadAllHistory();
+    };
+    loadHistoryBtns.push(panelLoadBtn);
+
+    scrollBar.appendChild(scrollGroup);
+    scrollBar.appendChild(panelLoadBtn);
+
+    // 2段目: タイトルとツールバーボタン群（Flexbox配置で重なりゼロ）
     var topBar = uiDoc.createElement('div');
-    topBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 10px 6px 10px;';
+    topBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:6px 10px 6px 10px;border-bottom:1px solid #f1f3f4;';
 
     var titleDiv = uiDoc.createElement('div');
-    titleDiv.textContent = 'AntiGravity 会話目次';
+    titleDiv.textContent = 'Antigravity 会話目次';
     titleDiv.style.cssText = 'font-weight:600;font-size:13px;color:#202124;white-space:nowrap;user-select:none;';
 
     var actionsDiv = uiDoc.createElement('div');
@@ -1170,9 +1216,9 @@
     topBar.appendChild(titleDiv);
     topBar.appendChild(actionsDiv);
 
-    // 2段目: 展開深度 (Depth 1〜6) + Wrap (折り返し) ボタン
+    // 3段目: 展開深度 (Depth 1〜6) + Wrap (折り返し) ボタン（目次リストの直上）
     var controlBar = uiDoc.createElement('div');
-    controlBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:4px 10px 8px 10px;gap:6px;border-top:1px solid #f1f3f4;';
+    controlBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:4px 10px 6px 10px;gap:6px;';
 
     var depthGroup = uiDoc.createElement('div');
     depthGroup.style.cssText = 'display:flex;align-items:center;gap:3px;';
@@ -1236,55 +1282,9 @@
     controlBar.appendChild(depthGroup);
     controlBar.appendChild(wrapBtn);
 
-    // 3段目: スクロール操作 (Home/PgUp/PgDn/End) + 全履歴読込
-    var scrollBar = uiDoc.createElement('div');
-    scrollBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:4px 10px 6px 10px;gap:6px;border-top:1px solid #f1f3f4;background:#f8f9fa;box-sizing:border-box;';
-
-    var scrollGroup = uiDoc.createElement('div');
-    scrollGroup.style.cssText = 'display:flex;align-items:center;gap:3px;';
-
-    var scrollLabel = uiDoc.createElement('span');
-    scrollLabel.textContent = '移動:';
-    scrollLabel.style.cssText = 'font-weight:bold;color:#5f6368;margin-right:2px;font-size:11px;user-select:none;';
-    scrollGroup.appendChild(scrollLabel);
-
-    var navDefs = [
-      { text: '⏮', title: '最上部へスクロール (Homeキー相当)', action: 'home' },
-      { text: '▲', title: '1画面分上へスクロール (PageUpキー相当)', action: 'pageUp' },
-      { text: '▼', title: '1画面分下へスクロール (PageDownキー相当)', action: 'pageDown' },
-      { text: '⏭', title: '最下部へスクロール (Endキー相当)', action: 'end' }
-    ];
-
-    navDefs.forEach(function(def) {
-      var btn = uiDoc.createElement('button');
-      btn.textContent = def.text;
-      btn.title = def.title;
-      btn.style.cssText = 'border:1px solid #dadce0; background:#f1f3f4; color:#3c4043; cursor:pointer; border-radius:3px; width:22px; height:22px; font-size:11px; padding:0; text-align:center; transition:all 0.15s; font-weight:bold;';
-      btn.onmouseenter = function() { btn.style.background = '#e8f0fe'; btn.style.color = '#1a73e8'; btn.style.borderColor = '#1a73e8'; };
-      btn.onmouseleave = function() { btn.style.background = '#f1f3f4'; btn.style.color = '#3c4043'; btn.style.borderColor = '#dadce0'; };
-      btn.onclick = function(e) {
-        e.preventDefault();
-        scrollChat(def.action);
-      };
-      scrollGroup.appendChild(btn);
-    });
-
-    var panelLoadBtn = uiDoc.createElement('button');
-    panelLoadBtn.textContent = '⏫ 全履歴読込';
-    panelLoadBtn.title = '最上部まで繰り返しスクロールして全チャット履歴を読込';
-    panelLoadBtn.style.cssText = 'border:1px solid #dadce0; background:#f1f3f4; color:#3c4043; border-radius:3px; height:22px; padding:0 6px; font-size:10.5px; cursor:pointer; font-weight:500; transition:all 0.15s; white-space:nowrap;';
-    panelLoadBtn.onclick = function(e) {
-      e.preventDefault();
-      startLoadAllHistory();
-    };
-    loadHistoryBtns.push(panelLoadBtn);
-
-    scrollBar.appendChild(scrollGroup);
-    scrollBar.appendChild(panelLoadBtn);
-
+    headerBlock.appendChild(scrollBar);
     headerBlock.appendChild(topBar);
     headerBlock.appendChild(controlBar);
-    headerBlock.appendChild(scrollBar);
 
     // 目次ツリー表示部
     content = uiDoc.createElement('div');
