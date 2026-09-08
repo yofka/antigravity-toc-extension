@@ -29,6 +29,20 @@
            uiDoc.body;
   }
 
+  function getOutermostPrompt(el) {
+    var promptSelector = '[aria-label="User message"], [data-testid="user-input-step"], [class*="user-input-step"]';
+    var outermost = el.closest(promptSelector) || el;
+    while (outermost.parentElement) {
+      var parentPrompt = outermost.parentElement.closest(promptSelector);
+      if (parentPrompt) {
+        outermost = parentPrompt;
+      } else {
+        break;
+      }
+    }
+    return outermost;
+  }
+
   function extractItems() {
     var root = getContentRoot();
     var selector = '[data-testid="user-input-step"], [aria-label="User message"], [class*="user-input-step"], h1, h2, h3, h4, h5, h6';
@@ -62,17 +76,14 @@
                      (el.className && typeof el.className === 'string' && el.className.indexOf('user-input') !== -1);
 
       if (isPrompt) {
-        var pRoot = el.closest('[data-testid="user-input-step"]') ||
-                    el.closest('[aria-label="User message"]') ||
-                    el.closest('[class*="user-input-step"]') ||
-                    el;
+        var pRoot = getOutermostPrompt(el);
 
         if (seenPrompts.has(pRoot)) return;
         seenPrompts.add(pRoot);
 
-        var textContainer = el.querySelector('.whitespace-pre-wrap') ||
-                            el.querySelector('[class*="text-"]') ||
-                            el;
+        var textContainer = pRoot.querySelector('.whitespace-pre-wrap') ||
+                            pRoot.querySelector('[class*="text-"]') ||
+                            pRoot;
         var clone = textContainer.cloneNode(true);
         clone.querySelectorAll('button, svg, [role="button"], [class*="user-input-buttons"], .timestamp').forEach(function(b) {
           b.remove();
