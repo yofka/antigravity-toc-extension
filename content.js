@@ -13,6 +13,7 @@
 
   var clickedId = null;
   var expandedState = {};
+  var expandedTextMap = {};
   var uiDoc = document;
   var isDocked = false;
 
@@ -152,16 +153,22 @@
     '.bk-toc-tree ul { list-style: none !important; padding: 0 !important; margin: 0 !important; }',
     '.bk-toc-tree li { list-style: none !important; margin: 0 !important; padding: 0 !important; }',
     '.bk-toc-tree ul ul { padding-left: 14px !important; border-left: 1px solid #e0e0e0 !important; margin-left: 6px !important; }',
-    '.bk-toc-item-row { display: flex !important; flex-direction: row !important; align-items: baseline !important; padding: 2px 0 !important; width: 100% !important; box-sizing: border-box !important; }',
-    '.bk-toc-toggle { width: 14px !important; height: 16px !important; flex-shrink: 0 !important; text-align: center !important; line-height: 16px !important; cursor: pointer !important; user-select: none !important; font-family: sans-serif !important; margin-right: 2px !important; color: #757575 !important; font-size: 10px !important; }',
+    '.bk-toc-item-row { display: flex !important; flex-direction: row !important; align-items: flex-start !important; padding: 2px 0 !important; width: 100% !important; box-sizing: border-box !important; }',
+    '.bk-toc-toggle { width: 14px !important; height: 16px !important; flex-shrink: 0 !important; text-align: center !important; line-height: 16px !important; cursor: pointer !important; user-select: none !important; font-family: sans-serif !important; margin-right: 2px !important; color: #757575 !important; font-size: 10px !important; margin-top: 2px !important; }',
     '.bk-toc-toggle:hover { color: #1a73e8 !important; }',
     '.bk-toc-toggle.empty { opacity: 0.3 !important; cursor: default !important; }',
     /* デフォルト: 1行で見切れて省略記号 (...) */
     '.bk-toc-link { flex-grow: 1 !important; text-decoration: none !important; display: block !important; min-width: 0 !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; font-size: 12px !important; line-height: 1.6 !important; padding: 1px 4px !important; color: #333333 !important; border-radius: 2px; }',
     '.bk-toc-link:hover { background-color: #f1f3f4 !important; color: #1a73e8 !important; }',
     '.bk-toc-link.prompt-item { font-weight: 600; color: #1a73e8 !important; }',
-    /* Wrap モード: 折り返して末尾まで表示 */
-    '#ag_toc_container.bk-toc-wrap-mode .bk-toc-link { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; word-break: break-word !important; overflow-wrap: anywhere !important; }',
+    /* Wrap モード: 初期は4行までに制限 */
+    '#ag_toc_container.bk-toc-wrap-mode .bk-toc-link { white-space: normal !important; display: -webkit-box !important; -webkit-box-orient: vertical !important; -webkit-line-clamp: 4 !important; overflow: hidden !important; text-overflow: ellipsis !important; word-break: break-word !important; overflow-wrap: anywhere !important; }',
+    /* Wrap モード: 展開表示 (末尾まで全行表示) */
+    '#ag_toc_container.bk-toc-wrap-mode .bk-toc-link.bk-toc-expanded { display: block !important; -webkit-line-clamp: unset !important; overflow: visible !important; }',
+    /* 「...」展開ボタン */
+    '.bk-toc-more-btn { display: none !important; flex-shrink: 0 !important; margin-left: 4px !important; align-self: flex-end !important; background: #f1f3f4 !important; color: #5f6368 !important; border: 1px solid #dadce0 !important; border-radius: 3px !important; font-size: 10px !important; line-height: 14px !important; height: 16px !important; padding: 0 4px !important; cursor: pointer !important; user-select: none !important; font-family: monospace, sans-serif !important; box-sizing: border-box !important; transition: all 0.15s ease !important; }',
+    '.bk-toc-more-btn:hover { background: #e8f0fe !important; color: #1a73e8 !important; border-color: #1a73e8 !important; }',
+    '#ag_toc_container.bk-toc-wrap-mode .bk-toc-more-btn.has-overflow { display: inline-flex !important; align-items: center !important; justify-content: center !important; }',
     '#ag_toc_container button:hover { opacity: 0.85; }'
   ].join('\n');
 
@@ -206,6 +213,37 @@
     }
   }
 
+  function updateOverflowButtons() {
+    if (!content) return;
+    var rows = content.querySelectorAll('.bk-toc-item-row');
+    rows.forEach(function(row) {
+      var a = row.querySelector('.bk-toc-link');
+      var btn = row.querySelector('.bk-toc-more-btn');
+      if (!a || !btn) return;
+      var idx = a.dataset.index;
+      var isExp = !!expandedTextMap[idx];
+      if (isExp) {
+        a.classList.add('bk-toc-expanded');
+        btn.textContent = '▲';
+        btn.title = '4行に折りたたむ';
+        btn.classList.add('has-overflow');
+      } else {
+        a.classList.remove('bk-toc-expanded');
+        btn.textContent = '...';
+        btn.title = '末尾まで展開';
+        if (isWrap && container && container.classList.contains('bk-toc-wrap-mode')) {
+          if (a.scrollHeight > a.clientHeight + 2) {
+            btn.classList.add('has-overflow');
+          } else {
+            btn.classList.remove('has-overflow');
+          }
+        } else {
+          btn.classList.remove('has-overflow');
+        }
+      }
+    });
+  }
+
   function updateWrapState() {
     if (!container || !wrapBtn) return;
     if (isWrap) {
@@ -223,6 +261,8 @@
       wrapBtn.style.fontWeight = 'normal';
       wrapBtn.title = '1行表示中 (クリックで折り返し表示に変更)';
     }
+    updateOverflowButtons();
+    setTimeout(updateOverflowButtons, 0);
   }
 
   function highlightElement(el) {
@@ -289,9 +329,31 @@
           } catch(err) {}
         }
       });
+      var moreBtn = uiDoc.createElement('button');
+      moreBtn.className = 'bk-toc-more-btn';
+      moreBtn.textContent = '...';
+      moreBtn.title = '末尾まで展開';
+      moreBtn.onclick = function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var isExp = !expandedTextMap[index];
+        expandedTextMap[index] = isExp;
+        if (isExp) {
+          a.classList.add('bk-toc-expanded');
+          moreBtn.textContent = '▲';
+          moreBtn.title = '4行に折りたたむ';
+          moreBtn.classList.add('has-overflow');
+        } else {
+          a.classList.remove('bk-toc-expanded');
+          moreBtn.textContent = '...';
+          moreBtn.title = '末尾まで展開';
+          moreBtn.classList.add('has-overflow');
+        }
+      };
 
       row.appendChild(toggle);
       row.appendChild(a);
+      row.appendChild(moreBtn);
       li.appendChild(row);
 
       if (node.children.length > 0) {
@@ -352,6 +414,8 @@
       content.appendChild(treeDom);
     }
     headingLinks = Array.from(content.querySelectorAll('a.bk-toc-link'));
+    updateOverflowButtons();
+    setTimeout(updateOverflowButtons, 0);
   }
 
   function highlightCurrentHeading() {
@@ -615,6 +679,7 @@
     highlightCurrentHeading();
 
     uiDoc.addEventListener('scroll', highlightCurrentHeading, { passive: true, capture: true });
+    window.addEventListener('resize', updateOverflowButtons, { passive: true });
 
     if (isFolded) {
       foldPanel();
