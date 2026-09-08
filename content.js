@@ -10,6 +10,7 @@
   var STORAGE_KEY_SIDE = 'ag_toc_side';
   var STORAGE_KEY_WIDTH = 'ag_toc_width';
   var STORAGE_KEY_DOCKED = 'ag_toc_docked';
+  var STORAGE_KEY_AUTOREFRESH = 'ag_toc_autorefresh';
 
   var currentMaxLevel = parseInt(localStorage.getItem(STORAGE_KEY_LEVEL), 10) || 2;
   var isWrap = localStorage.getItem(STORAGE_KEY_WRAP) === 'true'; // デフォルトは false (1行表示)
@@ -18,6 +19,7 @@
   var panelWidth = parseInt(localStorage.getItem(STORAGE_KEY_WIDTH), 10) || 340;
   if (isNaN(panelWidth) || panelWidth < 240) panelWidth = 340;
   var isDocked = localStorage.getItem(STORAGE_KEY_DOCKED) === 'true';
+  var isAutoRefresh = localStorage.getItem(STORAGE_KEY_AUTOREFRESH) !== 'false'; // デフォルトは ON (true)
 
   var clickedId = null;
   var expandedState = {};
@@ -144,6 +146,13 @@
         scroller.scrollTop = Math.min(scroller.scrollHeight, scroller.scrollTop + step);
       }
     }
+
+    if (isAutoRefresh) {
+      if (scrollRefreshTimer) clearTimeout(scrollRefreshTimer);
+      scrollRefreshTimer = setTimeout(function() {
+        autoRefreshHeadings();
+      }, 150);
+    }
   }
 
   function updateLoadHistoryUI(isLoading, statusText) {
@@ -241,6 +250,9 @@
         lastItemCount = currentItemCount;
         idleCount = 0;
         updateLoadHistoryUI(true, currentItemCount + '件');
+        if (isAutoRefresh) {
+          autoRefreshHeadings();
+        }
       } else {
         idleCount++;
         if (idleCount >= 6) {
@@ -427,6 +439,7 @@
   var miniBtn = null;
   var content = null;
   var dockBtn = null;
+  var eyeBtn = null;
   var sideBtn = null;
   var resizer = null;
   var wrapBtn = null;
@@ -477,6 +490,52 @@
     if (sideBtn) {
       sideBtn.title = 'パネル位置を左右切替 (現在: ' + (panelSide === 'right' ? '右側' : '左側') + ')';
     }
+  }
+
+  function createSvgIcon(type, color, isSolid) {
+    var svg = uiDoc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', '13');
+    svg.setAttribute('height', '13');
+    svg.style.pointerEvents = 'none';
+    svg.style.display = 'block';
+
+    if (type === 'eye') {
+      svg.setAttribute('viewBox', '0 0 24 24');
+      svg.setAttribute('fill', 'none');
+      svg.setAttribute('stroke', color);
+      svg.setAttribute('stroke-width', '2.2');
+      svg.setAttribute('stroke-linecap', 'round');
+      svg.setAttribute('stroke-linejoin', 'round');
+
+      var eyePath = uiDoc.createElementNS('http://www.w3.org/2000/svg', 'path');
+      eyePath.setAttribute('d', 'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z');
+      svg.appendChild(eyePath);
+
+      var eyeCircle = uiDoc.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      eyeCircle.setAttribute('cx', '12');
+      eyeCircle.setAttribute('cy', '12');
+      eyeCircle.setAttribute('r', '3');
+      eyeCircle.setAttribute('fill', color);
+      svg.appendChild(eyeCircle);
+    } else if (type === 'pin') {
+      svg.setAttribute('viewBox', '0 0 24 24');
+      if (isSolid) {
+        svg.setAttribute('fill', color);
+        var pinPathSolid = uiDoc.createElementNS('http://www.w3.org/2000/svg', 'path');
+        pinPathSolid.setAttribute('d', 'M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z');
+        svg.appendChild(pinPathSolid);
+      } else {
+        svg.setAttribute('fill', 'none');
+        svg.setAttribute('stroke', color);
+        svg.setAttribute('stroke-width', '2');
+        svg.setAttribute('stroke-linecap', 'round');
+        svg.setAttribute('stroke-linejoin', 'round');
+        var pinPathOutline = uiDoc.createElementNS('http://www.w3.org/2000/svg', 'path');
+        pinPathOutline.setAttribute('d', 'M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z');
+        svg.appendChild(pinPathOutline);
+      }
+    }
+    return svg;
   }
 
   var layoutObserver = null;
@@ -557,20 +616,125 @@
       }
 
       if (dockBtn) {
+        clearChildren(dockBtn);
         dockBtn.style.background = '#1a73e8';
         dockBtn.style.color = '#ffffff';
-        dockBtn.style.borderColor = '#1a73e8';
+        dockBtn.style.border = '1px solid #1a73e8';
         dockBtn.title = (panelSide === 'right' ? '右側' : '左側') + 'に埋め込み中 (クリックでフロート解除)';
+        dockBtn.appendChild(createSvgIcon('pin', '#ffffff', true));
       }
     } else {
       clearDockingStyles();
       applyPanelLayout();
       if (dockBtn) {
-        dockBtn.style.background = isDocked ? '#e8f0fe' : 'transparent';
-        dockBtn.style.color = isDocked ? '#1a73e8' : '#5f6368';
-        dockBtn.style.borderColor = isDocked ? '#1a73e8' : '#dadce0';
+        clearChildren(dockBtn);
+        dockBtn.style.background = 'transparent';
+        dockBtn.style.color = '#5f6368';
+        dockBtn.style.border = '1px solid #dadce0';
         dockBtn.title = (panelSide === 'right' ? '右側' : '左側') + 'に埋め込み (ドッキング切替)';
+        dockBtn.appendChild(createSvgIcon('pin', '#5f6368', false));
       }
+    }
+  }
+
+  function updateEyeButtonState() {
+    if (!eyeBtn) return;
+    clearChildren(eyeBtn);
+    if (isAutoRefresh) {
+      eyeBtn.style.background = '#1a73e8';
+      eyeBtn.style.color = '#ffffff';
+      eyeBtn.style.border = '1px solid #1a73e8';
+      eyeBtn.title = '自動目次更新: ON (新たな会話・スクロール時に自動更新 / クリックでOFF)';
+      eyeBtn.appendChild(createSvgIcon('eye', '#ffffff'));
+    } else {
+      eyeBtn.style.background = '#f1f3f4';
+      eyeBtn.style.color = '#80868b';
+      eyeBtn.style.border = '1px solid #dadce0';
+      eyeBtn.title = '自動目次更新: OFF (クリックでON)';
+      eyeBtn.appendChild(createSvgIcon('eye', '#80868b'));
+    }
+  }
+
+  var lastItemsFingerprint = '';
+
+  function getItemsFingerprint(items) {
+    if (!items || items.length === 0) return '';
+    var parts = [];
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      parts.push(item.tag + ':' + item.level + ':' + item.text);
+    }
+    return parts.join('|');
+  }
+
+  function autoRefreshHeadings() {
+    if (!isAutoRefresh || !content || isFolded || (container && container.style.display === 'none')) {
+      return;
+    }
+    var items = extractItems();
+    var fp = getItemsFingerprint(items);
+    if (fp !== lastItemsFingerprint) {
+      renderHeadings();
+      highlightCurrentHeading();
+    }
+  }
+
+  function isTocNode(node) {
+    if (!node) return false;
+    var el = (node.nodeType === 3 || node.nodeType === 8) ? node.parentElement : node;
+    if (!el || !el.closest) return false;
+    return !!(el.closest('#ag_toc_container') || el.closest('#ag_toc_mini_btn'));
+  }
+
+  var chatObserver = null;
+  var autoRefreshDebounceTimer = null;
+
+  function setupChatObserver() {
+    if (typeof MutationObserver === 'undefined') return;
+    if (chatObserver) {
+      try { chatObserver.disconnect(); } catch(e) {}
+      chatObserver = null;
+    }
+    if (!isAutoRefresh) return;
+
+    var target = getContentRoot();
+    var root = (target && target.parentElement && target.parentElement !== uiDoc.body) ? target.parentElement : (target || uiDoc.body);
+    if (!root) return;
+
+    chatObserver = new MutationObserver(function(mutations) {
+      if (!isAutoRefresh) return;
+      var hasExternal = false;
+      for (var i = 0; i < mutations.length; i++) {
+        var t = mutations[i].target;
+        if (!isTocNode(t)) {
+          hasExternal = true;
+          break;
+        }
+      }
+      if (!hasExternal) return;
+
+      if (autoRefreshDebounceTimer) clearTimeout(autoRefreshDebounceTimer);
+      autoRefreshDebounceTimer = setTimeout(function() {
+        autoRefreshHeadings();
+      }, 300);
+    });
+
+    chatObserver.observe(root, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    });
+  }
+
+  var scrollRefreshTimer = null;
+
+  function handleScrollActivity() {
+    highlightCurrentHeading();
+    if (isAutoRefresh) {
+      if (scrollRefreshTimer) clearTimeout(scrollRefreshTimer);
+      scrollRefreshTimer = setTimeout(function() {
+        autoRefreshHeadings();
+      }, 250);
     }
   }
 
@@ -768,6 +932,7 @@
 
     var items = extractItems();
     headingItems = items;
+    lastItemsFingerprint = getItemsFingerprint(items);
 
     if (items.length === 0) {
       var emptyDiv = uiDoc.createElement('div');
@@ -1265,15 +1430,34 @@
     refreshBtn.title = '最新の会話で更新';
     refreshBtn.style.cssText = 'background:#1a73e8;color:#fff;border:none;border-radius:4px;width:22px;height:22px;cursor:pointer;font-size:14px;line-height:20px;padding:0;text-align:center;font-family:sans-serif;';
     refreshBtn.onclick = function() {
+      lastItemsFingerprint = '';
       renderHeadings();
       highlightCurrentHeading();
     };
 
+    // 自動更新トグルボタン (👁)
+    eyeBtn = uiDoc.createElement('button');
+    eyeBtn.style.cssText = 'border-radius:4px;width:22px;height:22px;cursor:pointer;padding:0;display:inline-flex;align-items:center;justify-content:center;transition:all 0.15s;flex-shrink:0;box-sizing:border-box;';
+    updateEyeButtonState();
+    eyeBtn.onclick = function() {
+      isAutoRefresh = !isAutoRefresh;
+      try { localStorage.setItem(STORAGE_KEY_AUTOREFRESH, isAutoRefresh ? 'true' : 'false'); } catch(e){}
+      updateEyeButtonState();
+      if (isAutoRefresh) {
+        setupChatObserver();
+        autoRefreshHeadings();
+      } else {
+        if (chatObserver) {
+          try { chatObserver.disconnect(); } catch(e) {}
+          chatObserver = null;
+        }
+      }
+    };
+
     // ドッキングボタン
     dockBtn = uiDoc.createElement('button');
-    dockBtn.textContent = '📌';
     dockBtn.title = (panelSide === 'right' ? '右側' : '左側') + 'に埋め込み (ドッキング切替)';
-    dockBtn.style.cssText = 'background:transparent;color:#5f6368;border:1px solid #dadce0;border-radius:4px;width:22px;height:22px;cursor:pointer;font-size:11px;line-height:20px;padding:0;text-align:center;transition:all 0.15s;';
+    dockBtn.style.cssText = 'background:transparent;color:#5f6368;border:1px solid #dadce0;border-radius:4px;width:22px;height:22px;cursor:pointer;padding:0;display:inline-flex;align-items:center;justify-content:center;transition:all 0.15s;flex-shrink:0;box-sizing:border-box;';
     dockBtn.onclick = function() {
       isDocked = !isDocked;
       try { localStorage.setItem(STORAGE_KEY_DOCKED, isDocked); } catch(e){}
@@ -1295,6 +1479,7 @@
     actionsDiv.appendChild(shadeBtn);
     actionsDiv.appendChild(sideBtn);
     actionsDiv.appendChild(refreshBtn);
+    actionsDiv.appendChild(eyeBtn);
     actionsDiv.appendChild(dockBtn);
     actionsDiv.appendChild(closeBtn);
 
@@ -1385,10 +1570,11 @@
     updateLevelButtons();
     updateWrapState();
     updateDockingState();
+    setupChatObserver();
     renderHeadings();
     highlightCurrentHeading();
 
-    uiDoc.addEventListener('scroll', highlightCurrentHeading, { passive: true, capture: true });
+    uiDoc.addEventListener('scroll', handleScrollActivity, { passive: true, capture: true });
     window.addEventListener('resize', function() {
       var maxW = Math.max(240, Math.min(1000, window.innerWidth - 80));
       if (panelWidth > maxW) {
