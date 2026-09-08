@@ -35,6 +35,199 @@
            uiDoc.body;
   }
 
+  var isLoadingAllHistory = false;
+  var loadHistoryTimer = null;
+  var loadHistoryBtns = [];
+
+  function getChatScrollContainer() {
+    var root = getContentRoot();
+    var curr = root;
+    while (curr && curr !== uiDoc.body && curr !== uiDoc.documentElement) {
+      if (curr.scrollHeight > curr.clientHeight + 10) {
+        var s = window.getComputedStyle(curr);
+        if (s.overflowY === 'auto' || s.overflowY === 'scroll' || s.overflowY === 'overlay') {
+          return curr;
+        }
+      }
+      curr = curr.parentElement;
+    }
+
+    var best = null;
+    var maxArea = 0;
+    var candidates = uiDoc.querySelectorAll('[data-testid="conversation-view"], main, [role="main"], [class*="conversation"], [class*="chat"], [class*="scroll"]');
+    candidates.forEach(function(el) {
+      var scroller = el;
+      while (scroller && scroller !== uiDoc.body && scroller !== uiDoc.documentElement) {
+        if (scroller.scrollHeight > scroller.clientHeight + 10) {
+          var s = window.getComputedStyle(scroller);
+          if (s.overflowY === 'auto' || s.overflowY === 'scroll' || s.overflowY === 'overlay') {
+            var area = scroller.clientWidth * scroller.clientHeight;
+            if (area > maxArea) {
+              maxArea = area;
+              best = scroller;
+            }
+          }
+        }
+        scroller = scroller.parentElement;
+      }
+    });
+    if (best) return best;
+
+    uiDoc.querySelectorAll('*').forEach(function(e) {
+      if (e.id === 'ag_toc_container' || e.closest('#ag_toc_container') || e.id === 'ag_toc_mini_btn' || e.closest('#ag_toc_mini_btn')) return;
+      if (e.scrollHeight > e.clientHeight + 20) {
+        var s = window.getComputedStyle(e);
+        if (s.overflowY === 'auto' || s.overflowY === 'scroll' || s.overflowY === 'overlay') {
+          var a = e.clientWidth * e.clientHeight;
+          if (a > maxArea) {
+            maxArea = a;
+            best = e;
+          }
+        }
+      }
+    });
+
+    return best || window;
+  }
+
+  function scrollChat(action) {
+    var scroller = getChatScrollContainer();
+    var isWin = (scroller === window || scroller === uiDoc.body || scroller === uiDoc.documentElement);
+    var viewHeight = isWin ? window.innerHeight : scroller.clientHeight;
+    var step = Math.round(viewHeight * 0.8);
+
+    if (action === 'home' || action === 'Home') {
+      if (isWin) {
+        window.scrollTo(0, 0);
+      } else {
+        scroller.scrollTop = 0;
+      }
+    } else if (action === 'end' || action === 'End') {
+      if (isWin) {
+        var maxTop = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+        window.scrollTo(0, maxTop);
+      } else {
+        scroller.scrollTop = scroller.scrollHeight;
+      }
+    } else if (action === 'pageUp' || action === 'PageUp') {
+      if (isWin) {
+        window.scrollBy(0, -step);
+      } else {
+        scroller.scrollTop = Math.max(0, scroller.scrollTop - step);
+      }
+    } else if (action === 'pageDown' || action === 'PageDown') {
+      if (isWin) {
+        window.scrollBy(0, step);
+      } else {
+        scroller.scrollTop = Math.min(scroller.scrollHeight, scroller.scrollTop + step);
+      }
+    }
+  }
+
+  function updateLoadHistoryUI(isLoading, statusText) {
+    loadHistoryBtns = loadHistoryBtns.filter(function(b) { return b && b.isConnected; });
+    loadHistoryBtns.forEach(function(btn) {
+      if (isLoading) {
+        btn.classList.add('is-loading');
+        if (btn.dataset.pill === 'true') {
+          btn.textContent = '⏹';
+          btn.title = '全履歴読込中... クリックで中止 (' + (statusText || '') + ')';
+          btn.style.background = '#ea4335';
+          btn.style.color = '#ffffff';
+        } else {
+          btn.textContent = '⏹ 中止 (' + (statusText || '読込中') + ')';
+          btn.title = 'チャット全履歴の読込を中止';
+          btn.style.background = '#ea4335';
+          btn.style.color = '#ffffff';
+          btn.style.borderColor = '#d93025';
+        }
+      } else {
+        btn.classList.remove('is-loading');
+        if (btn.dataset.pill === 'true') {
+          btn.textContent = statusText === 'done' ? '✓' : '⏫';
+          btn.title = statusText === 'done' ? '全履歴の読込完了' : '全チャット履歴を自動読込 (Homeへ連続スクロール)';
+          btn.style.background = statusText === 'done' ? '#34a853' : 'rgba(255,255,255,0.2)';
+          btn.style.color = '#ffffff';
+        } else {
+          btn.textContent = statusText === 'done' ? '✓ 全履歴読込完了' : '⏫ 全履歴読込';
+          btn.title = '最上部まで繰り返しスクロールして全チャット履歴を読込';
+          btn.style.background = statusText === 'done' ? '#e6f4ea' : '#f1f3f4';
+          btn.style.color = statusText === 'done' ? '#137333' : '#3c4043';
+          btn.style.borderColor = statusText === 'done' ? '#137333' : '#dadce0';
+        }
+      }
+    });
+  }
+
+  function stopLoadAllHistory(completed) {
+    if (!isLoadingAllHistory && !loadHistoryTimer) return;
+    isLoadingAllHistory = false;
+    if (loadHistoryTimer) {
+      clearInterval(loadHistoryTimer);
+      loadHistoryTimer = null;
+    }
+    updateLoadHistoryUI(false, completed ? 'done' : 'stopped');
+    renderHeadings();
+    highlightCurrentHeading();
+
+    if (completed) {
+      setTimeout(function() {
+        updateLoadHistoryUI(false, 'idle');
+      }, 3000);
+    }
+  }
+
+  function startLoadAllHistory() {
+    if (isLoadingAllHistory) {
+      stopLoadAllHistory(false);
+      return;
+    }
+    isLoadingAllHistory = true;
+    var scroller = getChatScrollContainer();
+    var isWin = (scroller === window || scroller === uiDoc.body || scroller === uiDoc.documentElement);
+
+    if (isWin) {
+      window.scrollTo(0, 0);
+    } else {
+      scroller.scrollTop = 0;
+    }
+
+    var lastScrollHeight = isWin ? document.documentElement.scrollHeight : scroller.scrollHeight;
+    var lastItemCount = uiDoc.querySelectorAll('[data-testid="user-input-step"], [aria-label="User message"]').length;
+    var idleCount = 0;
+
+    updateLoadHistoryUI(true, lastItemCount + '件');
+
+    loadHistoryTimer = setInterval(function() {
+      if (!isLoadingAllHistory) {
+        clearInterval(loadHistoryTimer);
+        loadHistoryTimer = null;
+        return;
+      }
+
+      if (isWin) {
+        window.scrollTo(0, 0);
+      } else {
+        scroller.scrollTop = 0;
+      }
+
+      var currentScrollHeight = isWin ? document.documentElement.scrollHeight : scroller.scrollHeight;
+      var currentItemCount = uiDoc.querySelectorAll('[data-testid="user-input-step"], [aria-label="User message"]').length;
+
+      if (currentScrollHeight > lastScrollHeight || currentItemCount > lastItemCount) {
+        lastScrollHeight = currentScrollHeight;
+        lastItemCount = currentItemCount;
+        idleCount = 0;
+        updateLoadHistoryUI(true, currentItemCount + '件');
+      } else {
+        idleCount++;
+        if (idleCount >= 6) {
+          stopLoadAllHistory(true);
+        }
+      }
+    }, 350);
+  }
+
   function getOutermostPrompt(el) {
     var promptSelector = '[aria-label="User message"], [data-testid="user-input-step"], [class*="user-input-step"]';
     var outermost = el.closest(promptSelector) || el;
@@ -550,14 +743,79 @@
     }
   }
 
-  // 小さなシェード（最小化）ボタンの作成・表示（ドラッグ移動対応）
+  // 小さなシェード（最小化）ボタンの作成・表示（ドラッグ移動対応・スクロール操作ボタン付）
   function showMiniBtn() {
     if (!miniBtn) {
-      miniBtn = uiDoc.createElement('button');
+      miniBtn = uiDoc.createElement('div');
       miniBtn.id = 'ag_toc_mini_btn';
-      miniBtn.title = '目次パネルを展開 (ドラッグで移動可能 / Alt+T)';
-      miniBtn.style.cssText = 'position:fixed;top:50px;right:10px;z-index:2147483647;background:#1a73e8;color:#ffffff;border:1px solid #1557b0;border-radius:14px;height:28px;padding:0 10px;font-size:11px;font-weight:600;cursor:grab;display:flex;align-items:center;gap:4px;box-shadow:0 2px 8px rgba(0,0,0,0.25);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;user-select:none;touch-action:none;transition:background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;';
-      miniBtn.textContent = '📑 目次 ▲';
+      miniBtn.style.cssText = 'position:fixed;top:50px;right:10px;z-index:2147483647;background:#1a73e8;color:#ffffff;border:1px solid #1557b0;border-radius:15px;height:30px;padding:0 6px;font-size:11px;font-weight:600;cursor:grab;display:flex;align-items:center;gap:3px;box-shadow:0 2px 8px rgba(0,0,0,0.25);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;user-select:none;touch-action:none;transition:background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;box-sizing:border-box;';
+
+      var titleBtn = uiDoc.createElement('span');
+      titleBtn.textContent = '📑 目次 ▲';
+      titleBtn.title = '目次パネルを展開 (ドラッグで移動可能 / Alt+T)';
+      titleBtn.style.cssText = 'cursor:grab;padding:2px 4px;border-radius:4px;user-select:none;white-space:nowrap;';
+
+      function createDivider() {
+        var d = uiDoc.createElement('span');
+        d.style.cssText = 'width:1px;height:14px;background:rgba(255,255,255,0.35);margin:0 1px;flex-shrink:0;';
+        return d;
+      }
+
+      miniBtn.appendChild(titleBtn);
+      miniBtn.appendChild(createDivider());
+
+      var pillNavs = [
+        { text: '⏮', title: '最上部へスクロール (Homeキー相当)', action: 'home' },
+        { text: '▲', title: '1画面分上へスクロール (PageUpキー相当)', action: 'pageUp' },
+        { text: '▼', title: '1画面分下へスクロール (PageDownキー相当)', action: 'pageDown' },
+        { text: '⏭', title: '最下部へスクロール (Endキー相当)', action: 'end' }
+      ];
+
+      pillNavs.forEach(function(def) {
+        var btn = uiDoc.createElement('button');
+        btn.textContent = def.text;
+        btn.title = def.title;
+        btn.style.cssText = 'background:rgba(255,255,255,0.18);color:#ffffff;border:none;border-radius:10px;width:20px;height:20px;font-size:10px;font-weight:bold;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0;transition:background 0.15s;flex-shrink:0;';
+        btn.onmouseenter = function() { btn.style.background = 'rgba(255,255,255,0.35)'; };
+        btn.onmouseleave = function() { btn.style.background = 'rgba(255,255,255,0.18)'; };
+        btn.addEventListener('click', function(e) {
+          if (hasMoved) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+          e.preventDefault();
+          e.stopPropagation();
+          scrollChat(def.action);
+        });
+        miniBtn.appendChild(btn);
+      });
+
+      miniBtn.appendChild(createDivider());
+
+      var pillLoadBtn = uiDoc.createElement('button');
+      pillLoadBtn.textContent = '⏫';
+      pillLoadBtn.dataset.pill = 'true';
+      pillLoadBtn.title = '全チャット履歴を自動読込 (Homeへ連続スクロール)';
+      pillLoadBtn.style.cssText = 'background:rgba(255,255,255,0.18);color:#ffffff;border:none;border-radius:10px;width:22px;height:20px;font-size:10px;font-weight:bold;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0;transition:all 0.15s;flex-shrink:0;';
+      pillLoadBtn.onmouseenter = function() {
+        if (!isLoadingAllHistory) pillLoadBtn.style.background = 'rgba(255,255,255,0.35)';
+      };
+      pillLoadBtn.onmouseleave = function() {
+        if (!isLoadingAllHistory) pillLoadBtn.style.background = 'rgba(255,255,255,0.18)';
+      };
+      pillLoadBtn.addEventListener('click', function(e) {
+        if (hasMoved) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        startLoadAllHistory();
+      });
+      loadHistoryBtns.push(pillLoadBtn);
+      miniBtn.appendChild(pillLoadBtn);
 
       // 保存された位置の復元
       try {
@@ -615,8 +873,8 @@
         if (hasMoved) {
           var newLeft = initialLeft + dx;
           var newTop = initialTop + dy;
-          var btnW = miniBtn.offsetWidth || 80;
-          var btnH = miniBtn.offsetHeight || 28;
+          var btnW = miniBtn.offsetWidth || 180;
+          var btnH = miniBtn.offsetHeight || 30;
           var minX = 6;
           var maxX = Math.max(minX, window.innerWidth - btnW - 6);
           var minY = 6;
@@ -664,7 +922,7 @@
       miniBtn.onmouseenter = function() {
         if (!isDragging) {
           miniBtn.style.background = '#1557b0';
-          miniBtn.style.transform = 'scale(1.03)';
+          miniBtn.style.transform = 'scale(1.02)';
         }
       };
       miniBtn.onmouseleave = function() {
@@ -955,8 +1213,55 @@
     controlBar.appendChild(depthGroup);
     controlBar.appendChild(wrapBtn);
 
+    // 3段目: スクロール操作 (Home/PgUp/PgDn/End) + 全履歴読込
+    var scrollBar = uiDoc.createElement('div');
+    scrollBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:4px 10px 6px 10px;gap:6px;border-top:1px solid #f1f3f4;background:#f8f9fa;box-sizing:border-box;';
+
+    var scrollGroup = uiDoc.createElement('div');
+    scrollGroup.style.cssText = 'display:flex;align-items:center;gap:3px;';
+
+    var scrollLabel = uiDoc.createElement('span');
+    scrollLabel.textContent = '移動:';
+    scrollLabel.style.cssText = 'font-weight:bold;color:#5f6368;margin-right:2px;font-size:11px;user-select:none;';
+    scrollGroup.appendChild(scrollLabel);
+
+    var navDefs = [
+      { text: '⏮', title: '最上部へスクロール (Homeキー相当)', action: 'home' },
+      { text: '▲', title: '1画面分上へスクロール (PageUpキー相当)', action: 'pageUp' },
+      { text: '▼', title: '1画面分下へスクロール (PageDownキー相当)', action: 'pageDown' },
+      { text: '⏭', title: '最下部へスクロール (Endキー相当)', action: 'end' }
+    ];
+
+    navDefs.forEach(function(def) {
+      var btn = uiDoc.createElement('button');
+      btn.textContent = def.text;
+      btn.title = def.title;
+      btn.style.cssText = 'border:1px solid #dadce0; background:#f1f3f4; color:#3c4043; cursor:pointer; border-radius:3px; width:22px; height:22px; font-size:11px; padding:0; text-align:center; transition:all 0.15s; font-weight:bold;';
+      btn.onmouseenter = function() { btn.style.background = '#e8f0fe'; btn.style.color = '#1a73e8'; btn.style.borderColor = '#1a73e8'; };
+      btn.onmouseleave = function() { btn.style.background = '#f1f3f4'; btn.style.color = '#3c4043'; btn.style.borderColor = '#dadce0'; };
+      btn.onclick = function(e) {
+        e.preventDefault();
+        scrollChat(def.action);
+      };
+      scrollGroup.appendChild(btn);
+    });
+
+    var panelLoadBtn = uiDoc.createElement('button');
+    panelLoadBtn.textContent = '⏫ 全履歴読込';
+    panelLoadBtn.title = '最上部まで繰り返しスクロールして全チャット履歴を読込';
+    panelLoadBtn.style.cssText = 'border:1px solid #dadce0; background:#f1f3f4; color:#3c4043; border-radius:3px; height:22px; padding:0 6px; font-size:10.5px; cursor:pointer; font-weight:500; transition:all 0.15s; white-space:nowrap;';
+    panelLoadBtn.onclick = function(e) {
+      e.preventDefault();
+      startLoadAllHistory();
+    };
+    loadHistoryBtns.push(panelLoadBtn);
+
+    scrollBar.appendChild(scrollGroup);
+    scrollBar.appendChild(panelLoadBtn);
+
     headerBlock.appendChild(topBar);
     headerBlock.appendChild(controlBar);
+    headerBlock.appendChild(scrollBar);
 
     // 目次ツリー表示部
     content = uiDoc.createElement('div');
@@ -1002,6 +1307,32 @@
       }
     }
   });
+
+  // PageUp / PageDown / Home / End キーボード操作の補正（チャット閲覧時）
+  window.addEventListener('keydown', function(e) {
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+    var target = e.target;
+    if (target) {
+      var tag = target.tagName ? target.tagName.toUpperCase() : '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) {
+        return;
+      }
+    }
+
+    if (e.key === 'Home') {
+      e.preventDefault();
+      scrollChat('home');
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      scrollChat('end');
+    } else if (e.key === 'PageUp') {
+      e.preventDefault();
+      scrollChat('pageUp');
+    } else if (e.key === 'PageDown') {
+      e.preventDefault();
+      scrollChat('pageDown');
+    }
+  }, { capture: true });
 
   function tryStart() {
     if (isChatFrame()) {
