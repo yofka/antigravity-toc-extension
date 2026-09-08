@@ -7,10 +7,15 @@
   var STORAGE_KEY_WRAP = 'ag_toc_wrap';
   var STORAGE_KEY_FOLDED = 'ag_toc_folded';
   var STORAGE_KEY_MINI_POS = 'ag_toc_mini_pos';
+  var STORAGE_KEY_SIDE = 'ag_toc_side';
+  var STORAGE_KEY_WIDTH = 'ag_toc_width';
 
   var currentMaxLevel = parseInt(localStorage.getItem(STORAGE_KEY_LEVEL), 10) || 2;
   var isWrap = localStorage.getItem(STORAGE_KEY_WRAP) === 'true'; // デフォルトは false (1行表示)
   var isFolded = localStorage.getItem(STORAGE_KEY_FOLDED) === 'true';
+  var panelSide = localStorage.getItem(STORAGE_KEY_SIDE) === 'left' ? 'left' : 'right';
+  var panelWidth = parseInt(localStorage.getItem(STORAGE_KEY_WIDTH), 10) || 340;
+  if (isNaN(panelWidth) || panelWidth < 240) panelWidth = 340;
 
   var clickedId = null;
   var expandedState = {};
@@ -184,6 +189,10 @@
     /* 展開時: 見出し行エリアの高さいっぱいの縦長ボタン */
     '#ag_toc_container.bk-toc-wrap-mode .bk-toc-more-btn.is-expanded { align-self: stretch !important; height: auto !important; min-height: 100% !important; width: 18px !important; padding: 4px 0 !important; display: inline-flex !important; flex-direction: column !important; justify-content: space-between !important; align-items: center !important; background: #f1f3f4 !important; color: #1a73e8 !important; border: 1px solid #dadce0 !important; border-radius: 3px !important; font-size: 10px !important; font-weight: bold !important; cursor: pointer !important; user-select: none !important; box-sizing: border-box !important; transition: all 0.15s ease !important; }',
     '#ag_toc_container.bk-toc-wrap-mode .bk-toc-more-btn.is-expanded:hover { background: #e8f0fe !important; color: #1557b0 !important; border-color: #1a73e8 !important; }',
+    /* リサイズハンドル (ページ中央側の境界線: 左右ドラッグで幅変更) */
+    '.bk-toc-resizer { position: absolute !important; top: 0 !important; bottom: 0 !important; width: 8px !important; cursor: col-resize !important; z-index: 100 !important; user-select: none !important; touch-action: none !important; }',
+    '.bk-toc-resizer::after { content: "" !important; position: absolute !important; top: 0 !important; bottom: 0 !important; left: 3px !important; width: 2px !important; background: transparent !important; transition: background 0.15s ease !important; }',
+    '.bk-toc-resizer:hover::after, .bk-toc-resizer.is-resizing::after { background: #1a73e8 !important; }',
     '#ag_toc_container button:hover { opacity: 0.85; }'
   ].join('\n');
 
@@ -203,27 +212,67 @@
   var miniBtn = null;
   var content = null;
   var dockBtn = null;
+  var sideBtn = null;
+  var resizer = null;
   var wrapBtn = null;
   var headingLinks = [];
   var headingItems = [];
 
+  function applyPanelLayout() {
+    if (!container) return;
+    container.style.width = panelWidth + 'px';
+    if (panelSide === 'left') {
+      container.style.left = '0';
+      container.style.right = 'auto';
+      container.style.borderRight = '1px solid #dadce0';
+      container.style.borderLeft = 'none';
+      container.style.boxShadow = '2px 0 8px rgba(0,0,0,0.12)';
+      if (resizer) {
+        resizer.style.left = 'auto';
+        resizer.style.right = '-4px';
+      }
+    } else {
+      container.style.right = '0';
+      container.style.left = 'auto';
+      container.style.borderLeft = '1px solid #dadce0';
+      container.style.borderRight = 'none';
+      container.style.boxShadow = '-2px 0 8px rgba(0,0,0,0.12)';
+      if (resizer) {
+        resizer.style.left = '-4px';
+        resizer.style.right = 'auto';
+      }
+    }
+    if (sideBtn) {
+      sideBtn.title = 'パネル位置を左右切替 (現在: ' + (panelSide === 'right' ? '右側' : '左側') + ')';
+    }
+  }
+
   function updateDockingState() {
     var target = getContentRoot();
-    var width = (container && container.offsetWidth) || 340;
+    var width = (container && container.offsetWidth) || panelWidth || 340;
     if (isDocked && !isFolded && container && container.style.display !== 'none') {
-      target.style.paddingRight = width + 'px';
-      target.style.transition = 'padding-right 0.2s ease';
+      if (panelSide === 'right') {
+        target.style.paddingRight = width + 'px';
+        target.style.paddingLeft = '';
+      } else {
+        target.style.paddingLeft = width + 'px';
+        target.style.paddingRight = '';
+      }
+      target.style.transition = 'padding-right 0.2s ease, padding-left 0.2s ease';
       if (dockBtn) {
         dockBtn.style.background = '#1a73e8';
         dockBtn.style.color = '#fff';
         dockBtn.style.borderColor = '#1a73e8';
+        dockBtn.title = (panelSide === 'right' ? '右側' : '左側') + 'に埋め込み中 (クリックで解除)';
       }
     } else {
       target.style.paddingRight = '';
+      target.style.paddingLeft = '';
       if (dockBtn) {
         dockBtn.style.background = isDocked ? '#e8f0fe' : 'transparent';
         dockBtn.style.color = isDocked ? '#1a73e8' : '#5f6368';
         dockBtn.style.borderColor = isDocked ? '#1a73e8' : '#dadce0';
+        dockBtn.title = (panelSide === 'right' ? '右側' : '左側') + 'に埋め込み (ドッキング切替)';
       }
     }
   }
@@ -519,6 +568,10 @@
           miniBtn.style.left = Math.max(6, Math.min(maxL, savedPos.left)) + 'px';
           miniBtn.style.top = Math.max(6, Math.min(maxT, savedPos.top)) + 'px';
           miniBtn.style.right = 'auto';
+        } else if (panelSide === 'left') {
+          miniBtn.style.left = '10px';
+          miniBtn.style.right = 'auto';
+          miniBtn.style.top = '50px';
         }
       } catch(e) {}
 
@@ -665,10 +718,86 @@
     var existing = uiDoc.getElementById('ag_toc_container');
     if (existing) existing.remove();
 
-    // パネルコンテナ: top: 44px により、Antigravity最上部のヘッダーバーやアカウントアイコンを完全に回避！
+    // パネルコンテナ: top: 44px により、Antigravity最上部のヘッダーバーやアカウントアイコンを回避
     container = uiDoc.createElement('div');
     container.id = 'ag_toc_container';
-    container.style.cssText = 'position:fixed;top:44px;right:0;height:calc(100% - 44px);max-height:calc(100% - 44px);background:#ffffff;border-left:1px solid #dadce0;z-index:2147483647;font-size:12px;line-height:1.4em;box-shadow:-2px 0 8px rgba(0,0,0,0.12);min-width:240px;width:340px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;display:flex;flex-direction:column;color:#202124;box-sizing:border-box;';
+    container.style.cssText = 'position:fixed;top:44px;height:calc(100% - 44px);max-height:calc(100% - 44px);background:#ffffff;z-index:2147483647;font-size:12px;line-height:1.4em;min-width:240px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;display:flex;flex-direction:column;color:#202124;box-sizing:border-box;';
+
+    // リサイズハンドル（ページ中央側の境界線: 左右ドラッグで幅調節）
+    resizer = uiDoc.createElement('div');
+    resizer.id = 'ag_toc_resizer';
+    resizer.className = 'bk-toc-resizer';
+    resizer.title = 'ドラッグしてパネル幅を調節';
+
+    var isResizing = false;
+    var startPointerX = 0;
+    var startPanelWidth = 0;
+
+    resizer.addEventListener('pointerdown', function(e) {
+      if (e.button !== 0) return;
+      isResizing = true;
+      startPointerX = e.clientX;
+      startPanelWidth = container.offsetWidth || panelWidth;
+
+      resizer.classList.add('is-resizing');
+      uiDoc.body.style.cursor = 'col-resize';
+      uiDoc.body.style.userSelect = 'none';
+
+      if (resizer.setPointerCapture) {
+        try { resizer.setPointerCapture(e.pointerId); } catch(err) {}
+      }
+      e.preventDefault();
+    });
+
+    resizer.addEventListener('pointermove', function(e) {
+      if (!isResizing) return;
+      var deltaX = e.clientX - startPointerX;
+      var newWidth;
+      if (panelSide === 'right') {
+        newWidth = startPanelWidth - deltaX;
+      } else {
+        newWidth = startPanelWidth + deltaX;
+      }
+
+      var minW = 240;
+      var maxW = Math.max(minW, Math.min(1000, window.innerWidth - 80));
+      newWidth = Math.max(minW, Math.min(maxW, newWidth));
+
+      panelWidth = newWidth;
+      container.style.width = newWidth + 'px';
+
+      if (isDocked && !isFolded) {
+        var target = getContentRoot();
+        if (panelSide === 'right') {
+          target.style.paddingRight = newWidth + 'px';
+        } else {
+          target.style.paddingLeft = newWidth + 'px';
+        }
+      }
+    });
+
+    function onResizerPointerUp(e) {
+      if (!isResizing) return;
+      isResizing = false;
+      resizer.classList.remove('is-resizing');
+      uiDoc.body.style.cursor = '';
+      uiDoc.body.style.userSelect = '';
+
+      if (resizer.releasePointerCapture) {
+        try { resizer.releasePointerCapture(e.pointerId); } catch(err) {}
+      }
+
+      try {
+        localStorage.setItem(STORAGE_KEY_WIDTH, panelWidth);
+      } catch(err) {}
+
+      updateOverflowButtons();
+    }
+
+    resizer.addEventListener('pointerup', onResizerPointerUp);
+    resizer.addEventListener('pointercancel', onResizerPointerUp);
+
+    container.appendChild(resizer);
 
     // ヘッダー部全体
     var headerBlock = uiDoc.createElement('div');
@@ -694,6 +823,28 @@
       foldPanel();
     };
 
+    // 左右位置切替 (⇔) ボタン
+    sideBtn = uiDoc.createElement('button');
+    sideBtn.textContent = '⇔';
+    sideBtn.title = 'パネル位置を左右切替 (現在: ' + (panelSide === 'right' ? '右側' : '左側') + ')';
+    sideBtn.style.cssText = 'background:#f1f3f4;color:#5f6368;border:1px solid #dadce0;border-radius:4px;width:22px;height:22px;cursor:pointer;font-size:12px;font-weight:bold;line-height:20px;padding:0;text-align:center;font-family:sans-serif;transition:all 0.15s;';
+    sideBtn.onmouseenter = function() {
+      sideBtn.style.background = '#e8f0fe';
+      sideBtn.style.color = '#1a73e8';
+      sideBtn.style.borderColor = '#1a73e8';
+    };
+    sideBtn.onmouseleave = function() {
+      sideBtn.style.background = '#f1f3f4';
+      sideBtn.style.color = '#5f6368';
+      sideBtn.style.borderColor = '#dadce0';
+    };
+    sideBtn.onclick = function() {
+      panelSide = (panelSide === 'right' ? 'left' : 'right');
+      try { localStorage.setItem(STORAGE_KEY_SIDE, panelSide); } catch(e){}
+      applyPanelLayout();
+      updateDockingState();
+    };
+
     // 再更新ボタン
     var refreshBtn = uiDoc.createElement('button');
     refreshBtn.textContent = '⟳';
@@ -707,7 +858,7 @@
     // ドッキングボタン
     dockBtn = uiDoc.createElement('button');
     dockBtn.textContent = '📌';
-    dockBtn.title = '右側に埋め込み (ドッキング切替)';
+    dockBtn.title = (panelSide === 'right' ? '右側' : '左側') + 'に埋め込み (ドッキング切替)';
     dockBtn.style.cssText = 'background:transparent;color:#5f6368;border:1px solid #dadce0;border-radius:4px;width:22px;height:22px;cursor:pointer;font-size:11px;line-height:20px;padding:0;text-align:center;';
     dockBtn.onclick = function() {
       isDocked = !isDocked;
@@ -730,6 +881,7 @@
     };
 
     actionsDiv.appendChild(shadeBtn);
+    actionsDiv.appendChild(sideBtn);
     actionsDiv.appendChild(refreshBtn);
     actionsDiv.appendChild(dockBtn);
     actionsDiv.appendChild(closeBtn);
@@ -816,6 +968,7 @@
 
     uiDoc.body.appendChild(container);
 
+    applyPanelLayout();
     updateLevelButtons();
     updateWrapState();
     updateDockingState();
@@ -824,6 +977,12 @@
 
     uiDoc.addEventListener('scroll', highlightCurrentHeading, { passive: true, capture: true });
     window.addEventListener('resize', function() {
+      var maxW = Math.max(240, Math.min(1000, window.innerWidth - 80));
+      if (panelWidth > maxW) {
+        panelWidth = maxW;
+        if (container) container.style.width = panelWidth + 'px';
+        updateDockingState();
+      }
       updateOverflowButtons();
       clampMiniBtnPosition();
     }, { passive: true });
