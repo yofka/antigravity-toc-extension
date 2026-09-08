@@ -39,55 +39,76 @@
   var loadHistoryTimer = null;
   var loadHistoryBtns = [];
 
-  function getChatScrollContainer() {
-    var root = getContentRoot();
-    var curr = root;
-    while (curr && curr !== uiDoc.body && curr !== uiDoc.documentElement) {
-      if (curr.scrollHeight > curr.clientHeight + 10) {
-        var s = window.getComputedStyle(curr);
-        if (s.overflowY === 'auto' || s.overflowY === 'scroll' || s.overflowY === 'overlay') {
-          return curr;
-        }
+  function isArtifactElement(el) {
+    if (!el) return false;
+    if (el.closest) {
+      if (el.closest('[data-testid*="artifact"], [class*="artifact"], [aria-label*="artifact" i], [id*="artifact"], aside, [role="complementary"]')) {
+        return true;
       }
-      curr = curr.parentElement;
     }
+    return false;
+  }
 
-    var best = null;
-    var maxArea = 0;
-    var candidates = uiDoc.querySelectorAll('[data-testid="conversation-view"], main, [role="main"], [class*="conversation"], [class*="chat"], [class*="scroll"]');
-    candidates.forEach(function(el) {
-      var scroller = el;
-      while (scroller && scroller !== uiDoc.body && scroller !== uiDoc.documentElement) {
-        if (scroller.scrollHeight > scroller.clientHeight + 10) {
-          var s = window.getComputedStyle(scroller);
-          if (s.overflowY === 'auto' || s.overflowY === 'scroll' || s.overflowY === 'overlay') {
-            var area = scroller.clientWidth * scroller.clientHeight;
-            if (area > maxArea) {
-              maxArea = area;
-              best = scroller;
+  function getChatScrollContainer() {
+    // 1. チャット内のメッセージまたは会話コンテナを起点に、直近のスクロール可能な親要素を探索
+    var anchor = uiDoc.querySelector('[data-testid="user-input-step"], [aria-label="User message"]') ||
+                 uiDoc.querySelector('[data-testid="conversation-view"]');
+
+    if (anchor) {
+      var curr = anchor;
+      while (curr && curr !== uiDoc.body && curr !== uiDoc.documentElement) {
+        if (!curr.closest('#ag_toc_container') && !curr.closest('#ag_toc_mini_btn') && !isArtifactElement(curr)) {
+          // artifactペインを内包している要素（画面全体の左右分割親コンテナ）は除外
+          var hasArtifact = curr.querySelector && curr.querySelector('[data-testid*="artifact"], [class*="artifact"]');
+          if (!hasArtifact && curr.scrollHeight > curr.clientHeight + 10) {
+            var s = window.getComputedStyle(curr);
+            if (s.overflowY === 'auto' || s.overflowY === 'scroll' || s.overflowY === 'overlay') {
+              return curr;
             }
           }
         }
-        scroller = scroller.parentElement;
+        curr = curr.parentElement;
       }
-    });
-    if (best) return best;
+    }
 
-    uiDoc.querySelectorAll('*').forEach(function(e) {
-      if (e.id === 'ag_toc_container' || e.closest('#ag_toc_container') || e.id === 'ag_toc_mini_btn' || e.closest('#ag_toc_mini_btn')) return;
-      if (e.scrollHeight > e.clientHeight + 20) {
-        var s = window.getComputedStyle(e);
-        if (s.overflowY === 'auto' || s.overflowY === 'scroll' || s.overflowY === 'overlay') {
-          var a = e.clientWidth * e.clientHeight;
-          if (a > maxArea) {
-            maxArea = a;
-            best = e;
+    // 2. conversation-view の内部または自身でスクロールしている要素を探索
+    var conv = uiDoc.querySelector('[data-testid="conversation-view"]');
+    if (conv && !isArtifactElement(conv)) {
+      if (conv.scrollHeight > conv.clientHeight + 10) {
+        var cs = window.getComputedStyle(conv);
+        if (cs.overflowY === 'auto' || cs.overflowY === 'scroll' || cs.overflowY === 'overlay') {
+          return conv;
+        }
+      }
+      var children = conv.querySelectorAll('*');
+      for (var i = 0; i < children.length; i++) {
+        var child = children[i];
+        if (isArtifactElement(child)) continue;
+        if (child.scrollHeight > child.clientHeight + 10) {
+          var chs = window.getComputedStyle(child);
+          if (chs.overflowY === 'auto' || chs.overflowY === 'scroll' || chs.overflowY === 'overlay') {
+            return child;
           }
         }
       }
-    });
+    }
 
-    return best || window;
+    // 3. main または chat 系要素から探索（artifact ペインおよび目次コンテナは厳格に除外）
+    var candidates = uiDoc.querySelectorAll('[class*="conversation"], [class*="chat"], main, [role="main"]');
+    for (var j = 0; j < candidates.length; j++) {
+      var c = candidates[j];
+      if (c.closest('#ag_toc_container') || c.closest('#ag_toc_mini_btn') || isArtifactElement(c)) continue;
+      var cHasArtifact = c.querySelector && c.querySelector('[data-testid*="artifact"], [class*="artifact"]');
+      if (cHasArtifact) continue;
+      if (c.scrollHeight > c.clientHeight + 10) {
+        var cst = window.getComputedStyle(c);
+        if (cst.overflowY === 'auto' || cst.overflowY === 'scroll' || cst.overflowY === 'overlay') {
+          return c;
+        }
+      }
+    }
+
+    return window;
   }
 
   function scrollChat(action) {
@@ -778,12 +799,10 @@
         btn.style.cssText = 'background:rgba(255,255,255,0.18);color:#ffffff;border:none;border-radius:10px;width:20px;height:20px;font-size:10px;font-weight:bold;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0;transition:background 0.15s;flex-shrink:0;';
         btn.onmouseenter = function() { btn.style.background = 'rgba(255,255,255,0.35)'; };
         btn.onmouseleave = function() { btn.style.background = 'rgba(255,255,255,0.18)'; };
+        btn.addEventListener('pointerdown', function(e) {
+          e.stopPropagation();
+        });
         btn.addEventListener('click', function(e) {
-          if (hasMoved) {
-            e.preventDefault();
-            e.stopPropagation();
-            return;
-          }
           e.preventDefault();
           e.stopPropagation();
           scrollChat(def.action);
@@ -804,12 +823,10 @@
       pillLoadBtn.onmouseleave = function() {
         if (!isLoadingAllHistory) pillLoadBtn.style.background = 'rgba(255,255,255,0.18)';
       };
+      pillLoadBtn.addEventListener('pointerdown', function(e) {
+        e.stopPropagation();
+      });
       pillLoadBtn.addEventListener('click', function(e) {
-        if (hasMoved) {
-          e.preventDefault();
-          e.stopPropagation();
-          return;
-        }
         e.preventDefault();
         e.stopPropagation();
         startLoadAllHistory();
@@ -843,6 +860,9 @@
 
       miniBtn.addEventListener('pointerdown', function(e) {
         if (e.button !== 0) return;
+        if (e.target && e.target.tagName === 'BUTTON') {
+          return;
+        }
         isDragging = true;
         hasMoved = false;
         startX = e.clientX;
@@ -914,6 +934,9 @@
           e.preventDefault();
           e.stopPropagation();
           setTimeout(function() { hasMoved = false; }, 0);
+          return;
+        }
+        if (e.target && e.target.tagName === 'BUTTON') {
           return;
         }
         expandPanel();
