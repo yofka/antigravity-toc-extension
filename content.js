@@ -9,6 +9,7 @@
   var STORAGE_KEY_MINI_POS = 'ag_toc_mini_pos';
   var STORAGE_KEY_SIDE = 'ag_toc_side';
   var STORAGE_KEY_WIDTH = 'ag_toc_width';
+  var STORAGE_KEY_DOCKED = 'ag_toc_docked';
 
   var currentMaxLevel = parseInt(localStorage.getItem(STORAGE_KEY_LEVEL), 10) || 2;
   var isWrap = localStorage.getItem(STORAGE_KEY_WRAP) === 'true'; // デフォルトは false (1行表示)
@@ -16,12 +17,12 @@
   var panelSide = localStorage.getItem(STORAGE_KEY_SIDE) === 'left' ? 'left' : 'right';
   var panelWidth = parseInt(localStorage.getItem(STORAGE_KEY_WIDTH), 10) || 340;
   if (isNaN(panelWidth) || panelWidth < 240) panelWidth = 340;
+  var isDocked = localStorage.getItem(STORAGE_KEY_DOCKED) === 'true';
 
   var clickedId = null;
   var expandedState = {};
   var expandedTextMap = {};
   var uiDoc = document;
-  var isDocked = false;
 
   function clearChildren(el) {
     while (el.firstChild) {
@@ -432,28 +433,45 @@
   var headingLinks = [];
   var headingItems = [];
 
+  function clearDockingStyles() {
+    var target = getContentRoot();
+    if (target && target !== uiDoc.body) {
+      target.style.removeProperty('width');
+      target.style.removeProperty('margin-left');
+      target.style.removeProperty('margin-right');
+      target.style.removeProperty('padding-left');
+      target.style.removeProperty('padding-right');
+    }
+  }
+
   function applyPanelLayout() {
     if (!container) return;
     container.style.width = panelWidth + 'px';
-    if (panelSide === 'left') {
-      container.style.left = '0';
-      container.style.right = 'auto';
-      container.style.borderRight = '1px solid #dadce0';
-      container.style.borderLeft = 'none';
-      container.style.boxShadow = '2px 0 8px rgba(0,0,0,0.12)';
-      if (resizer) {
-        resizer.style.left = 'auto';
-        resizer.style.right = '-4px';
-      }
-    } else {
-      container.style.right = '0';
-      container.style.left = 'auto';
-      container.style.borderLeft = '1px solid #dadce0';
-      container.style.borderRight = 'none';
-      container.style.boxShadow = '-2px 0 8px rgba(0,0,0,0.12)';
-      if (resizer) {
-        resizer.style.left = '-4px';
-        resizer.style.right = 'auto';
+    if (!isDocked || isFolded || container.style.display === 'none') {
+      container.style.position = 'fixed';
+      container.style.top = '44px';
+      container.style.height = 'calc(100% - 44px)';
+      container.style.maxHeight = 'calc(100% - 44px)';
+      if (panelSide === 'left') {
+        container.style.left = '0';
+        container.style.right = 'auto';
+        container.style.borderRight = '1px solid #dadce0';
+        container.style.borderLeft = 'none';
+        container.style.boxShadow = '2px 0 8px rgba(0,0,0,0.12)';
+        if (resizer) {
+          resizer.style.left = 'auto';
+          resizer.style.right = '-4px';
+        }
+      } else {
+        container.style.right = '0';
+        container.style.left = 'auto';
+        container.style.borderLeft = '1px solid #dadce0';
+        container.style.borderRight = 'none';
+        container.style.boxShadow = '-2px 0 8px rgba(0,0,0,0.12)';
+        if (resizer) {
+          resizer.style.left = '-4px';
+          resizer.style.right = 'auto';
+        }
       }
     }
     if (sideBtn) {
@@ -461,27 +479,92 @@
     }
   }
 
+  var layoutObserver = null;
+  var observedWrapper = null;
+
   function updateDockingState() {
+    if (!container) return;
     var target = getContentRoot();
-    var width = (container && container.offsetWidth) || panelWidth || 340;
-    if (isDocked && !isFolded && container && container.style.display !== 'none') {
-      if (panelSide === 'right') {
-        target.style.paddingRight = width + 'px';
-        target.style.paddingLeft = '';
+
+    if (isDocked && !isFolded && container.style.display !== 'none') {
+      var paneWrapper = (target && target.parentElement && target.parentElement !== uiDoc.body) ? target.parentElement : target;
+      var paneRect = (paneWrapper && paneWrapper !== uiDoc.body) ? paneWrapper.getBoundingClientRect() : null;
+
+      if (paneRect && paneRect.width > 0 && paneRect.height > 0) {
+        var top = Math.max(0, Math.round(paneRect.top));
+        var height = Math.round(paneRect.height);
+
+        container.style.position = 'fixed';
+        container.style.top = top + 'px';
+        container.style.height = height + 'px';
+        container.style.maxHeight = height + 'px';
+        container.style.width = panelWidth + 'px';
+
+        if (panelSide === 'left') {
+          var left = Math.round(paneRect.left);
+          container.style.left = left + 'px';
+          container.style.right = 'auto';
+          container.style.borderRight = '1px solid #dadce0';
+          container.style.borderLeft = 'none';
+          container.style.boxShadow = '2px 0 8px rgba(0,0,0,0.12)';
+          if (resizer) {
+            resizer.style.left = 'auto';
+            resizer.style.right = '-4px';
+          }
+          if (target && target !== uiDoc.body) {
+            target.style.setProperty('margin-left', panelWidth + 'px', 'important');
+            target.style.setProperty('margin-right', '0px', 'important');
+            target.style.setProperty('width', 'calc(100% - ' + panelWidth + 'px)', 'important');
+            target.style.removeProperty('padding-left');
+            target.style.removeProperty('padding-right');
+          }
+        } else {
+          var right = Math.max(0, Math.round(window.innerWidth - paneRect.right));
+          container.style.left = 'auto';
+          container.style.right = right + 'px';
+          container.style.borderLeft = '1px solid #dadce0';
+          container.style.borderRight = 'none';
+          container.style.boxShadow = '-2px 0 8px rgba(0,0,0,0.12)';
+          if (resizer) {
+            resizer.style.left = '-4px';
+            resizer.style.right = 'auto';
+          }
+          if (target && target !== uiDoc.body) {
+            target.style.setProperty('margin-left', '0px', 'important');
+            target.style.setProperty('margin-right', panelWidth + 'px', 'important');
+            target.style.setProperty('width', 'calc(100% - ' + panelWidth + 'px)', 'important');
+            target.style.removeProperty('padding-left');
+            target.style.removeProperty('padding-right');
+          }
+        }
+
+        // チャットペインのリサイズやサイドバー開閉を自動検知
+        if (typeof ResizeObserver !== 'undefined' && paneWrapper && paneWrapper !== observedWrapper) {
+          if (layoutObserver) {
+            try { layoutObserver.disconnect(); } catch(e) {}
+          }
+          layoutObserver = new ResizeObserver(function() {
+            if (isDocked && !isFolded && container && container.style.display !== 'none') {
+              updateDockingState();
+            }
+          });
+          layoutObserver.observe(paneWrapper);
+          if (uiDoc.body) layoutObserver.observe(uiDoc.body);
+          observedWrapper = paneWrapper;
+        }
       } else {
-        target.style.paddingLeft = width + 'px';
-        target.style.paddingRight = '';
+        applyPanelLayout();
       }
-      target.style.transition = 'padding-right 0.2s ease, padding-left 0.2s ease';
+
       if (dockBtn) {
         dockBtn.style.background = '#1a73e8';
-        dockBtn.style.color = '#fff';
+        dockBtn.style.color = '#ffffff';
         dockBtn.style.borderColor = '#1a73e8';
-        dockBtn.title = (panelSide === 'right' ? '右側' : '左側') + 'に埋め込み中 (クリックで解除)';
+        dockBtn.title = (panelSide === 'right' ? '右側' : '左側') + 'に埋め込み中 (クリックでフロート解除)';
       }
     } else {
-      target.style.paddingRight = '';
-      target.style.paddingLeft = '';
+      clearDockingStyles();
+      applyPanelLayout();
       if (dockBtn) {
         dockBtn.style.background = isDocked ? '#e8f0fe' : 'transparent';
         dockBtn.style.color = isDocked ? '#1a73e8' : '#5f6368';
@@ -974,6 +1057,7 @@
     if (container) {
       container.style.display = 'none';
     }
+    clearDockingStyles();
     updateDockingState();
     showMiniBtn();
   }
@@ -987,6 +1071,7 @@
       initUI();
     } else {
       container.style.display = 'flex';
+      applyPanelLayout();
       updateDockingState();
       renderHeadings();
       highlightCurrentHeading();
@@ -1042,18 +1127,20 @@
 
       var minW = 240;
       var maxW = Math.max(minW, Math.min(1000, window.innerWidth - 80));
+      if (isDocked && !isFolded) {
+        var target = getContentRoot();
+        var paneWrapper = (target && target.parentElement && target.parentElement !== uiDoc.body) ? target.parentElement : target;
+        if (paneWrapper && paneWrapper.clientWidth > 0) {
+          maxW = Math.max(minW, Math.min(1000, paneWrapper.clientWidth - 280));
+        }
+      }
       newWidth = Math.max(minW, Math.min(maxW, newWidth));
 
       panelWidth = newWidth;
       container.style.width = newWidth + 'px';
 
       if (isDocked && !isFolded) {
-        var target = getContentRoot();
-        if (panelSide === 'right') {
-          target.style.paddingRight = newWidth + 'px';
-        } else {
-          target.style.paddingLeft = newWidth + 'px';
-        }
+        updateDockingState();
       }
     });
 
@@ -1186,9 +1273,10 @@
     dockBtn = uiDoc.createElement('button');
     dockBtn.textContent = '📌';
     dockBtn.title = (panelSide === 'right' ? '右側' : '左側') + 'に埋め込み (ドッキング切替)';
-    dockBtn.style.cssText = 'background:transparent;color:#5f6368;border:1px solid #dadce0;border-radius:4px;width:22px;height:22px;cursor:pointer;font-size:11px;line-height:20px;padding:0;text-align:center;';
+    dockBtn.style.cssText = 'background:transparent;color:#5f6368;border:1px solid #dadce0;border-radius:4px;width:22px;height:22px;cursor:pointer;font-size:11px;line-height:20px;padding:0;text-align:center;transition:all 0.15s;';
     dockBtn.onclick = function() {
       isDocked = !isDocked;
+      try { localStorage.setItem(STORAGE_KEY_DOCKED, isDocked); } catch(e){}
       updateDockingState();
     };
 
@@ -1198,10 +1286,7 @@
     closeBtn.title = '閉じる (Alt+T で再表示)';
     closeBtn.style.cssText = 'background:#ea4335;color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-weight:bold;font-size:12px;line-height:20px;padding:0;text-align:center;margin-left:2px;';
     closeBtn.onclick = function() {
-      if (isDocked) {
-        isDocked = false;
-        updateDockingState();
-      }
+      clearDockingStyles();
       container.remove();
       container = null;
       hideMiniBtn();
@@ -1309,8 +1394,9 @@
       if (panelWidth > maxW) {
         panelWidth = maxW;
         if (container) container.style.width = panelWidth + 'px';
-        updateDockingState();
       }
+      applyPanelLayout();
+      updateDockingState();
       updateOverflowButtons();
       clampMiniBtnPosition();
     }, { passive: true });
